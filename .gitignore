@@ -1,2 +1,2 @@
-/os/target
-/os/Cargo.lock
+os/target/
+os/Cargo.lock
