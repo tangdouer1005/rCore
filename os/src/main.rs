@@ -1,14 +1,20 @@
 #![no_main]
 #![no_std]
-mod lang_items;
+#![feature(panic_info_message)]
 
 use core::{arch::global_asm, ptr::write_volatile};
 global_asm!(include_str!("entry.asm"));
 
+mod sbi;
+#[macro_use]
+mod console;
+mod lang_items;
+
 #[no_mangle]
 pub fn rust_main() {
     bss_clear();
-    loop{}
+    println!("hello world");
+    panic!("fuck");
 }
 
 fn bss_clear() {
