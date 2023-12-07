@@ -12,12 +12,12 @@ mod lang_items;
 
 #[no_mangle]
 pub fn rust_main() {
-    bss_clear();
+    clear_bss();
     println!("hello world");
     panic!("fuck");
 }
 
-fn bss_clear() {
+fn clear_bss() {
     extern "C" {
         fn sbss();
         fn ebss();
