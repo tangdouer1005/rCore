@@ -1,5 +1,6 @@
+
+#![allow(unused)]
 use core::arch::asm;
-#[allow(unused)]
 
 // legacy extensions: ignore fid
 const SBI_SET_TIMER: usize = 0;
