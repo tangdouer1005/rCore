@@ -12,7 +12,7 @@ mod logging;
 mod sbi;
 //mod sync;
 //pub mod syscall;
-//pub mod trap;
+pub mod trap;
 
 
 use core::arch::global_asm;
@@ -70,7 +70,7 @@ pub fn rust_main() -> ! {
     );
     error!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
     
-    //trap::init();
+    trap::init();
     //batch::init();
     //batch::run_next_app();
     loop{}
