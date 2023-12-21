@@ -30,7 +30,7 @@ mod lang_items;
 mod logging;
 mod sbi;
 mod sync;
-mod loader;
+mod config;
 pub mod syscall;
 pub mod trap;
 
@@ -86,8 +86,9 @@ pub fn rust_main() -> ! {
     );
     error!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
     trap::init();
-    loader::load_apps();
-    
+    unsafe{
+        batch::load_apps();
+    }
     batch::init();
     batch::run_next_app();
 }

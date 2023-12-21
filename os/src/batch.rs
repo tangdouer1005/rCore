@@ -5,12 +5,7 @@ use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use core::arch::asm;
 use lazy_static::*;
-
-const USER_STACK_SIZE: usize = 4096 * 2;
-const KERNEL_STACK_SIZE: usize = 4096 * 2;
-const MAX_APP_NUM: usize = 16;
-const APP_BASE_ADDRESS: usize = 0x80400000;
-const APP_SIZE_LIMIT: usize = 0x20000;
+use crate::config::*;
 
 #[repr(align(4096))]
 struct KernelStack {
@@ -67,29 +62,6 @@ impl AppManager {
         }
     }
 
-    unsafe fn load_app(&self, app_id: usize) {
-        if app_id >= self.num_app {
-            println!("All applications completed!");
-            shutdown(false);
-        }
-        println!("[kernel] Loading app_{}", app_id);
-        // clear app area
-        core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, APP_SIZE_LIMIT).fill(0);
-        let app_src = core::slice::from_raw_parts(
-            self.app_start[app_id] as *const u8,
-            self.app_start[app_id + 1] - self.app_start[app_id],
-        );
-        let app_dst = core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, app_src.len());
-        app_dst.copy_from_slice(app_src);
-        // Memory fence about fetching the instruction memory
-        // It is guaranteed that a subsequent instruction fetch must
-        // observes all previous writes to the instruction memory.
-        // Therefore, fence.i must be executed after we have loaded
-        // the code of the next app into the instruction memory.
-        // See also: riscv non-priv spec chapter 3, 'Zifencei' extension.
-        asm!("fence.i");
-    }
-
     pub fn get_current_app(&self) -> usize {
         self.current_app
     }
@@ -97,6 +69,39 @@ impl AppManager {
     pub fn move_to_next_app(&mut self) {
         self.current_app += 1;
     }
+}
+pub unsafe fn load_apps() {
+    extern "C" { fn _num_app(); }
+    let num_app_ptr = _num_app as usize as *const usize;
+    let num_app = num_app_ptr.read_volatile();
+    let app_start = unsafe {
+        core::slice::from_raw_parts(num_app_ptr.add(1), num_app + 1)
+    };
+    // clear i-cache first
+    unsafe { asm!("fence.i"); }
+    // load apps
+    for i in 0..num_app {
+        let base_i = get_base_i(i);
+        // clear region
+        (base_i..base_i + APP_SIZE_LIMIT).for_each(|addr| unsafe {
+            (addr as *mut u8).write_volatile(0)
+        });
+        // load app from data section to memory
+        let src = unsafe {
+            core::slice::from_raw_parts(
+                app_start[i] as *const u8,
+                app_start[i + 1] - app_start[i]
+            )
+        };
+        let dst = unsafe {
+            core::slice::from_raw_parts_mut(base_i as *mut u8, src.len())
+        };
+        dst.copy_from_slice(src);
+    }
+}
+
+fn get_base_i(app_id: usize) -> usize {
+    APP_BASE_ADDRESS + app_id * APP_SIZE_LIMIT
 }
 
 lazy_static! {
@@ -111,6 +116,7 @@ lazy_static! {
             let app_start_raw: &[usize] =
                 core::slice::from_raw_parts(num_app_ptr.add(1), num_app + 1);
             app_start[..=num_app].copy_from_slice(app_start_raw);
+
             AppManager {
                 num_app,
                 current_app: 0,
@@ -134,9 +140,13 @@ pub fn print_app_info() {
 pub fn run_next_app() -> ! {
     let mut app_manager = APP_MANAGER.exclusive_access();
     let current_app = app_manager.get_current_app();
-    unsafe {
-        app_manager.load_app(current_app);
+
+
+    if current_app >= app_manager.num_app {
+        println!("All applications completed!");
+        shutdown(false);
     }
+
     app_manager.move_to_next_app();
     drop(app_manager);
     // before this we have to drop local variables related to resources manually
@@ -146,7 +156,7 @@ pub fn run_next_app() -> ! {
     }
     unsafe {
         __restore(KERNEL_STACK.push_context(TrapContext::app_init_context(
-            APP_BASE_ADDRESS,
+            APP_BASE_ADDRESS + current_app * APP_SIZE_LIMIT,
             USER_STACK.get_sp(),
         )) as *const _ as usize);
     }
