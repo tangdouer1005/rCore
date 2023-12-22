@@ -25,12 +25,13 @@ use core::arch::global_asm;
 use log::*;
 #[macro_use]
 mod console;
-pub mod batch;
+pub mod task;
 mod lang_items;
 mod logging;
 mod sbi;
 mod sync;
 mod config;
+mod loader;
 pub mod syscall;
 pub mod trap;
 
@@ -87,8 +88,7 @@ pub fn rust_main() -> ! {
     error!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
     trap::init();
     unsafe{
-        batch::load_apps();
+        loader::load_apps();
     }
-    batch::init();
-    batch::run_next_app();
+    loop{}
 }
