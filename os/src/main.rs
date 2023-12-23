@@ -90,5 +90,6 @@ pub fn rust_main() -> ! {
     unsafe{
         loader::load_apps();
     }
+    task::run_first_task();
     loop{}
 }

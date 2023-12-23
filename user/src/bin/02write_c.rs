@@ -11,6 +11,7 @@ const HEIGHT: usize = 3;
 
 #[no_mangle]
 fn main() -> i32 {
+    println!("run third app");
     for i in 0..HEIGHT {
         for _ in 0..WIDTH {
             print!("C");

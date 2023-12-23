@@ -7,3 +7,10 @@ pub fn sys_exit(exit_code: i32) -> ! {
     //run_next_app()
     loop{}
 }
+
+/// current task gives up resources for other tasks
+pub fn sys_yield() -> isize {
+    println!("[kernel] Application try to yield");
+    0
+}
+

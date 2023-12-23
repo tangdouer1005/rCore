@@ -1,164 +1,106 @@
-//! batch subsystem
+//! Task management implementation
+//!
+//! Everything about task management, like starting and switching tasks is
+//! implemented here.
+//!
+//! A single global instance of [`TaskManager`] called `TASK_MANAGER` controls
+//! all the tasks in the operating system.
+//!
+//! Be careful when you see `__switch` ASM function in `switch.S`. Control flow around this function
+//! might not be what you expect.
 
-use crate::sbi::shutdown;
+mod context;
+mod switch;
+
+#[allow(clippy::module_inception)]
+mod task;
+
+use crate::config::MAX_APP_NUM;
+use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
-use core::arch::asm;
 use lazy_static::*;
-use crate::config::*;
+use switch::__switch;
+use task::{TaskControlBlock, TaskStatus};
+use log::*;
+pub use context::TaskContext;
 
-#[repr(align(4096))]
-struct KernelStack {
-    data: [u8; KERNEL_STACK_SIZE],
-}
-
-#[repr(align(4096))]
-struct UserStack {
-    data: [u8; USER_STACK_SIZE],
-}
-
-static KERNEL_STACK: KernelStack = KernelStack {
-    data: [0; KERNEL_STACK_SIZE],
-};
-static USER_STACK: UserStack = UserStack {
-    data: [0; USER_STACK_SIZE],
-};
-
-impl KernelStack {
-    fn get_sp(&self) -> usize {
-        self.data.as_ptr() as usize + KERNEL_STACK_SIZE
-    }
-    pub fn push_context(&self, cx: TrapContext) -> &'static mut TrapContext {
-        let cx_ptr = (self.get_sp() - core::mem::size_of::<TrapContext>()) as *mut TrapContext;
-        unsafe {
-            *cx_ptr = cx;
-        }
-        unsafe { cx_ptr.as_mut().unwrap() }
-    }
-}
-
-impl UserStack {
-    fn get_sp(&self) -> usize {
-        self.data.as_ptr() as usize + USER_STACK_SIZE
-    }
-}
-
-struct AppManager {
+/// The task manager, where all the tasks are managed.
+///
+/// Functions implemented on `TaskManager` deals with all task state transitions
+/// and task context switching. For convenience, you can find wrappers around it
+/// in the module level.
+///
+/// Most of `TaskManager` are hidden behind the field `inner`, to defer
+/// borrowing checks to runtime. You can see examples on how to use `inner` in
+/// existing functions on `TaskManager`.
+pub struct TaskManager {
+    /// total number of tasks
     num_app: usize,
-    current_app: usize,
-    app_start: [usize; MAX_APP_NUM + 1],
+    /// use inner value to get mutable access
+    inner: UPSafeCell<TaskManagerInner>,
 }
 
-impl AppManager {
-    pub fn print_app_info(&self) {
-        println!("[kernel] num_app = {}", self.num_app);
-        for i in 0..self.num_app {
-            println!(
-                "[kernel] app_{} [{:#x}, {:#x})",
-                i,
-                self.app_start[i],
-                self.app_start[i + 1]
-            );
-        }
-    }
-
-    pub fn get_current_app(&self) -> usize {
-        self.current_app
-    }
-
-    pub fn move_to_next_app(&mut self) {
-        self.current_app += 1;
-    }
-}
-pub unsafe fn load_apps() {
-    extern "C" { fn _num_app(); }
-    let num_app_ptr = _num_app as usize as *const usize;
-    let num_app = num_app_ptr.read_volatile();
-    let app_start = unsafe {
-        core::slice::from_raw_parts(num_app_ptr.add(1), num_app + 1)
-    };
-    // clear i-cache first
-    unsafe { asm!("fence.i"); }
-    // load apps
-    for i in 0..num_app {
-        let base_i = get_base_i(i);
-        // clear region
-        (base_i..base_i + APP_SIZE_LIMIT).for_each(|addr| unsafe {
-            (addr as *mut u8).write_volatile(0)
-        });
-        // load app from data section to memory
-        let src = unsafe {
-            core::slice::from_raw_parts(
-                app_start[i] as *const u8,
-                app_start[i + 1] - app_start[i]
-            )
-        };
-        let dst = unsafe {
-            core::slice::from_raw_parts_mut(base_i as *mut u8, src.len())
-        };
-        dst.copy_from_slice(src);
-    }
-}
-
-fn get_base_i(app_id: usize) -> usize {
-    APP_BASE_ADDRESS + app_id * APP_SIZE_LIMIT
+/// Inner of Task Manager
+pub struct TaskManagerInner {
+    /// task list
+    tasks: [TaskControlBlock; MAX_APP_NUM],
+    /// id of current `Running` task
+    current_task: usize,
 }
 
 lazy_static! {
-    static ref APP_MANAGER: UPSafeCell<AppManager> = unsafe {
-        UPSafeCell::new({
-            extern "C" {
-                fn _num_app();
-            }
-            let num_app_ptr = _num_app as usize as *const usize;
-            let num_app = num_app_ptr.read_volatile();
-            let mut app_start: [usize; MAX_APP_NUM + 1] = [0; MAX_APP_NUM + 1];
-            let app_start_raw: &[usize] =
-                core::slice::from_raw_parts(num_app_ptr.add(1), num_app + 1);
-            app_start[..=num_app].copy_from_slice(app_start_raw);
-
-            AppManager {
-                num_app,
-                current_app: 0,
-                app_start,
-            }
-        })
+    /// Global variable: TASK_MANAGER
+    pub static ref TASK_MANAGER: TaskManager = {
+        let num_app = get_num_app();
+        let mut tasks = [TaskControlBlock {
+            task_cx: TaskContext::zero_init(),
+            task_status: TaskStatus::UnInit,
+        }; MAX_APP_NUM];
+        for (i, task) in tasks.iter_mut().enumerate() {
+            task.task_cx = TaskContext::goto_restore(init_app_cx(i));
+            task.task_status = TaskStatus::Ready;
+        }
+        TaskManager {
+            num_app,
+            inner: unsafe {
+                UPSafeCell::new(TaskManagerInner {
+                    tasks,
+                    current_task: 0,
+                })
+            },
+        }
     };
 }
 
-/// init batch subsystem
-pub fn init() {
-    print_app_info();
+impl TaskManager {
+    /// Run the first task in task list.
+    ///
+    /// Generally, the first task in task list is an idle task (we call it zero process later).
+    /// But in ch3, we load apps statically, so the first task is a real app.
+    fn run_first_task(&self) -> ! {
+        let mut inner = self.inner.exclusive_access();
+        let task0: &mut TaskControlBlock = &mut inner.tasks[0];
+        task0.task_status = TaskStatus::Running;
+        let next_task_cx_ptr: *const TaskContext = &task0.task_cx as *const TaskContext;
+        
+        drop(inner);
+        let mut _unused = TaskContext::zero_init();
+        // before this, we should drop local variables that must be dropped manually
+
+        
+        unsafe {
+            let a = ((*next_task_cx_ptr).sp) as *const TrapContext;
+            debug!(
+                "sepc: {:x} sepc: {:x}", (*a).sepc, (*next_task_cx_ptr).sp
+            );
+            __switch(&mut _unused as *mut TaskContext, next_task_cx_ptr);
+        }
+        panic!("unreachable in run_first_task!");
+    }
 }
 
-/// print apps info
-pub fn print_app_info() {
-    APP_MANAGER.exclusive_access().print_app_info();
-}
-
-/// run next app
-pub fn run_next_app() -> ! {
-    let mut app_manager = APP_MANAGER.exclusive_access();
-    let current_app = app_manager.get_current_app();
-
-
-    if current_app >= app_manager.num_app {
-        println!("All applications completed!");
-        shutdown(false);
-    }
-
-    app_manager.move_to_next_app();
-    drop(app_manager);
-    // before this we have to drop local variables related to resources manually
-    // and release the resources
-    extern "C" {
-        fn __restore(cx_addr: usize);
-    }
-    unsafe {
-        __restore(KERNEL_STACK.push_context(TrapContext::app_init_context(
-            APP_BASE_ADDRESS + current_app * APP_SIZE_LIMIT,
-            USER_STACK.get_sp(),
-        )) as *const _ as usize);
-    }
-    panic!("Unreachable in batch::run_current_app!");
+/// run first task
+pub fn run_first_task() {
+    TASK_MANAGER.run_first_task();
 }
