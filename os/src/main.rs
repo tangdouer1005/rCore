@@ -23,6 +23,11 @@
 use core::arch::global_asm;
 
 use log::*;
+
+#[path = "boards/qemu.rs"]
+mod board;
+
+
 #[macro_use]
 mod console;
 pub mod task;
@@ -87,9 +92,8 @@ pub fn rust_main() -> ! {
     );
     error!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
     trap::init();
-    unsafe{
-        loader::load_apps();
-    }
+    loader::load_apps();
     task::run_first_task();
-    loop{}
+    
+    panic!("Unreachable in rust_main!");
 }
