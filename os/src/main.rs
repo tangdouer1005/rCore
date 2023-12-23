@@ -39,6 +39,7 @@ mod config;
 mod loader;
 pub mod syscall;
 pub mod trap;
+mod timer;
 
 global_asm!(include_str!("entry.asm"));
 global_asm!(include_str!("link_app.S"));
@@ -92,6 +93,8 @@ pub fn rust_main() -> ! {
     );
     error!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
     trap::init();
+    trap::enable_timer_interrupt();
+    timer::set_next_trigger();
     loader::load_apps();
     task::run_first_task();
     
