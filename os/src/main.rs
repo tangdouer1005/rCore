@@ -19,6 +19,7 @@
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]
+#![feature(alloc_error_handler)]
 
 use core::arch::global_asm;
 
@@ -27,6 +28,7 @@ use log::*;
 #[path = "boards/qemu.rs"]
 mod board;
 
+extern crate alloc;
 
 #[macro_use]
 mod console;
@@ -40,6 +42,7 @@ mod loader;
 pub mod syscall;
 pub mod trap;
 mod timer;
+mod mm;
 
 global_asm!(include_str!("entry.asm"));
 global_asm!(include_str!("link_app.S"));
@@ -95,8 +98,9 @@ pub fn rust_main() -> ! {
     trap::init();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
-    loader::load_apps();
-    task::run_first_task();
+    mm::init();
+    // loader::load_apps();
+    // task::run_first_task();
     
     panic!("Unreachable in rust_main!");
 }
