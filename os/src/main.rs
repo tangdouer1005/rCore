@@ -31,6 +31,9 @@ mod board;
 extern crate alloc;
 
 #[macro_use]
+extern crate bitflags;
+
+#[macro_use]
 mod console;
 pub mod task;
 mod lang_items;
