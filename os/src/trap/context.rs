@@ -8,7 +8,7 @@ pub struct TrapContext {
     /// CSR sstatus      
     pub sstatus: Sstatus,
     /// CSR sepc
-    pub sepc: usize,w
+    pub sepc: usize,
     /// Addr of Page Table
     pub kernel_satp: usize,
     /// kernel stack

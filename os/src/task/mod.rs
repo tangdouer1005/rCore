@@ -16,7 +16,7 @@ mod switch;
 mod task;
 
 use crate::config::MAX_APP_NUM;
-use crate::loader::{get_num_app, init_app_cx};
+use crate::loader::{get_num_app, get_app_data};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use lazy_static::*;
@@ -24,6 +24,8 @@ use switch::__switch;
 use task::{TaskControlBlock, TaskStatus};
 use log::*;
 pub use context::TaskContext;
+use alloc::vec::Vec;
+
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -44,22 +46,21 @@ pub struct TaskManager {
 /// Inner of Task Manager
 pub struct TaskManagerInner {
     /// task list
-    tasks: [TaskControlBlock; MAX_APP_NUM],
+    tasks: Vec<TaskControlBlock>,
     /// id of current `Running` task
     current_task: usize,
 }
 
+
 lazy_static! {
-    /// Global variable: TASK_MANAGER
+    /// a `TaskManager` global instance through lazy_static!
     pub static ref TASK_MANAGER: TaskManager = {
+        println!("init TASK_MANAGER");
         let num_app = get_num_app();
-        let mut tasks = [TaskControlBlock {
-            task_cx: TaskContext::zero_init(),
-            task_status: TaskStatus::UnInit,
-        }; MAX_APP_NUM];
-        for (i, task) in tasks.iter_mut().enumerate() {
-            task.task_cx = TaskContext::goto_restore(init_app_cx(i));
-            task.task_status = TaskStatus::Ready;
+        println!("num_app = {}", num_app);
+        let mut tasks: Vec<TaskControlBlock> = Vec::new();
+        for i in 0..num_app {
+            tasks.push(TaskControlBlock::new(get_app_data(i), i));
         }
         TaskManager {
             num_app,
@@ -72,6 +73,7 @@ lazy_static! {
         }
     };
 }
+
 
 
 impl TaskManager {
@@ -142,6 +144,14 @@ impl TaskManager {
             crate::board::QEMU_EXIT_HANDLE.exit_success();
         }
     }
+
+    
+    /// Get the current 'Running' task's token.
+    fn get_current_token(&self) -> usize {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].get_user_token()
+    }
+
 }
 
 /// run first task
@@ -174,5 +184,10 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// Get the current 'Running' task's token.
+pub fn current_user_token() -> usize {
+    TASK_MANAGER.get_current_token()
 }
 

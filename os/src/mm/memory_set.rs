@@ -46,18 +46,18 @@ impl MemorySet {
     pub fn token(&self) -> usize {
         self.page_table.token()
     }
-    // /// Assume that no conflicts.
-    // pub fn insert_framed_area(
-    //     &mut self,
-    //     start_va: VirtAddr,
-    //     end_va: VirtAddr,
-    //     permission: MapPermission,
-    // ) {
-    //     self.push(
-    //         MapArea::new(start_va, end_va, MapType::Framed, permission),
-    //         None,
-    //     );
-    // }
+    /// Assume that no conflicts.
+    pub fn insert_framed_area(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+        permission: MapPermission,
+    ) {
+        self.push(
+            MapArea::new(start_va, end_va, MapType::Framed, permission),
+            None,
+        );
+    }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {
@@ -229,6 +229,10 @@ impl MemorySet {
         )
     }
    
+    
+    pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
+        self.page_table.translate(vpn)
+    }
 }
 
 
