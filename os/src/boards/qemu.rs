@@ -80,3 +80,6 @@ pub const QEMU_EXIT_HANDLE: RISCV64 = RISCV64::new(VIRT_TEST);
 
 pub const CLOCK_FREQ: usize = 10000000;
 
+pub const MMIO: &[(usize, usize)] = &[
+    (0x0010_0000, 0x00_2000), // VIRT_TEST/RTC  in virt machine
+];
