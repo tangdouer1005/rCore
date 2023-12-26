@@ -15,7 +15,8 @@ pub fn init(){
     heap_allocator::heap_test();
     frame_allocator::init_frame_allocator();
     frame_allocator::frame_allocator_test();
-    memory_set::remap_test();
-
     KERNEL_SPACE.exclusive_access().activate();
+
+
+    memory_set::remap_test();
 }

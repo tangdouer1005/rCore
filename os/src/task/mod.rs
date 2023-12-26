@@ -22,7 +22,6 @@ use crate::trap::TrapContext;
 use lazy_static::*;
 use switch::__switch;
 use task::{TaskControlBlock, TaskStatus};
-use log::*;
 pub use context::TaskContext;
 use alloc::vec::Vec;
 
@@ -43,8 +42,7 @@ pub struct TaskManager {
     inner: UPSafeCell<TaskManagerInner>,
 }
 
-/// Inner of Task Manager
-pub struct TaskManagerInner {
+struct TaskManagerInner {
     /// task list
     tasks: Vec<TaskControlBlock>,
     /// id of current `Running` task
