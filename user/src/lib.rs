@@ -1,4 +1,3 @@
-// 用户库（包括入口函数、初始化函数、I/O 函数和系统调用接口等）
 #![feature(linkage)]
 #![feature(panic_info_message)]
 #![no_main]
@@ -19,6 +18,10 @@ pub fn yield_() -> isize {
 }
 pub fn get_time() -> isize {
     sys_get_time()
+}
+
+pub fn sbrk(size: i32) -> isize {
+    sys_sbrk(size)
 }
 
 
