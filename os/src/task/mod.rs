@@ -11,6 +11,7 @@
 
 mod context;
 mod switch;
+mod pid;
 
 #[allow(clippy::module_inception)]
 mod task;
@@ -24,6 +25,7 @@ use switch::__switch;
 use task::{TaskControlBlock, TaskStatus};
 pub use context::TaskContext;
 use alloc::vec::Vec;
+pub use pid::{KernelStack, pid_alloc, PidHandle};
 
 
 /// The task manager, where all the tasks are managed.

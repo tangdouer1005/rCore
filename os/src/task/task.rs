@@ -1,12 +1,23 @@
-//! Types related to task management
+//!Implementation of [`TaskControlBlock`]
 use super::TaskContext;
-use crate::config::{kernel_stack_position, TRAP_CONTEXT};
-use crate::mm::{MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use super::{pid_alloc, KernelStack, PidHandle};
+use crate::config::TRAP_CONTEXT;
+use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
-
-
+use alloc::sync::{Arc, Weak};
+use alloc::vec::Vec;
+use core::cell::RefMut;
 
 pub struct TaskControlBlock {
+    // immutable
+    pub pid: PidHandle,
+    pub kernel_stack: KernelStack,
+    // mutable
+    inner: UPSafeCell<TaskControlBlockInner>,
+}
+
+pub struct TaskControlBlockInner {
     pub task_cx: TaskContext,
     pub task_status: TaskStatus,
     pub memory_set: MemorySet,
@@ -15,42 +26,62 @@ pub struct TaskControlBlock {
 
     pub heap_bottom: usize,
     pub program_brk: usize,
+    pub parent: Option<Weak<TaskControlBlock>>,
+    pub children: Vec<Arc<TaskControlBlock>>,
+    pub exit_code: i32,
 }
 
-
-impl TaskControlBlock {
+impl TaskControlBlockInner {
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
         self.trap_cx_ppn.get_mut()
     }
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
-    pub fn new(elf_data: &[u8], app_id: usize) -> Self {
+    fn get_status(&self) -> TaskStatus {
+        self.task_status
+    }
+    pub fn is_zombie(&self) -> bool {
+        self.get_status() == TaskStatus::Zombie
+    }
+}
+
+impl TaskControlBlock {
+    pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
+        self.inner.exclusive_access()
+    }
+    pub fn new(elf_data: &[u8]) -> Self {
         // memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT).into())
             .unwrap()
             .ppn();
-        let task_status = TaskStatus::Ready;
-        // map a kernel-stack in kernel space
-        let (kernel_stack_bottom, kernel_stack_top) = kernel_stack_position(app_id);
-        KERNEL_SPACE.exclusive_access().insert_framed_area(
-            kernel_stack_bottom.into(),
-            kernel_stack_top.into(),
-            MapPermission::R | MapPermission::W,
-        );
+        // alloc a pid and a kernel stack in kernel space
+        let pid_handle = pid_alloc();
+        let kernel_stack = KernelStack::new(&pid_handle);
+        let kernel_stack_top = kernel_stack.get_top();
+        // push a task context which goes to trap_return to the top of kernel stack
         let task_control_block = Self {
-            task_status,
-            task_cx: TaskContext::goto_trap_return(kernel_stack_top),
-            memory_set,
-            trap_cx_ppn,
-            base_size: user_sp,
-            heap_bottom: user_sp,
-            program_brk: user_sp,
+            pid: pid_handle,
+            kernel_stack,
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    trap_cx_ppn,
+                    base_size: user_sp,
+                    heap_bottom: user_sp,
+                    program_brk: user_sp,
+                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                    task_status: TaskStatus::Ready,
+                    memory_set,
+                    parent: None,
+                    children: Vec::new(),
+                    exit_code: 0,
+                })
+            },
         };
         // prepare TrapContext in user space
-        let trap_cx = task_control_block.get_trap_cx();
+        let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
@@ -62,33 +93,35 @@ impl TaskControlBlock {
     }
     /// change the location of the program break. return None if failed.
     pub fn change_program_brk(&mut self, size: i32) -> Option<usize> {
-        let old_break = self.program_brk;
-        let new_brk = self.program_brk as isize + size as isize;
-        if new_brk < self.heap_bottom as isize {
+        let inner = self.inner_exclusive_access();
+        let old_break = inner.program_brk;
+        let new_brk = inner.program_brk as isize + size as isize;
+        if new_brk < inner.heap_bottom as isize {
             return None;
         }
         let result = if size < 0 {
-            self.memory_set
-                .shrink_to(VirtAddr(self.heap_bottom), VirtAddr(new_brk as usize))
+            self.inner_exclusive_access().memory_set
+                .shrink_to(VirtAddr(inner.heap_bottom), VirtAddr(new_brk as usize))
         } else {
-            self.memory_set
-                .append_to(VirtAddr(self.heap_bottom), VirtAddr(new_brk as usize))
+            self.inner_exclusive_access().memory_set
+                .append_to(VirtAddr(inner.heap_bottom), VirtAddr(new_brk as usize))
         };
         if result {
-            self.program_brk = new_brk as usize;
+            self.inner_exclusive_access().program_brk = new_brk as usize;
             Some(old_break)
         } else {
             None
         }
     }
+
+    pub fn getpid(&self) -> usize {
+        self.pid.0
+    }
 }
-
-
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum TaskStatus {
-    UnInit,
     Ready,
     Running,
-    Exited,
+    Zombie,
 }
