@@ -28,7 +28,10 @@ pub use context::TaskContext;
 use alloc::vec::Vec;
 pub use pid::{KernelStack, pid_alloc, PidHandle};
 pub use manager::{fetch_task, add_task};
-pub use processor::{take_current_task, schedule};
+pub use processor::{
+    current_task, current_trap_cx, current_user_token, run_tasks, schedule, take_current_task,
+    Processor,
+};
 use alloc::sync::Arc;
 
 lazy_static! {
