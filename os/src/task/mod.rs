@@ -12,6 +12,8 @@
 mod context;
 mod switch;
 mod pid;
+mod manager;
+mod processor;
 
 #[allow(clippy::module_inception)]
 mod task;
@@ -26,7 +28,7 @@ use task::{TaskControlBlock, TaskStatus};
 pub use context::TaskContext;
 use alloc::vec::Vec;
 pub use pid::{KernelStack, pid_alloc, PidHandle};
-
+pub use manager::{fetch_task};
 
 /// The task manager, where all the tasks are managed.
 ///
